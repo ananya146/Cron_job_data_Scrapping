@@ -1,0 +1,33 @@
+name: Scrape Goodreads
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'  # every 1 minute
+  workflow_dispatch:      # manual trigger support
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run scraper
+        run: python scripts/extract_books.py
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add books.csv
+          git commit -m "Update book links [auto]" || echo "No changes to commit"
+          git push
