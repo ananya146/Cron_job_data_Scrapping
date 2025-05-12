@@ -2,8 +2,8 @@ name: Scrape Goodreads
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # every 1 minute
-  workflow_dispatch:      # manual trigger support
+    - cron: '*/1 * * * *'  # runs every 1 minute
+  workflow_dispatch:        # allow manual runs too
 
 jobs:
   run-scraper:
@@ -28,6 +28,7 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
+          git pull --rebase
           git add books.csv
           git commit -m "Update book links [auto]" || echo "No changes to commit"
           git push
