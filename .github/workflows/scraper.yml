@@ -2,7 +2,7 @@ name: Scrape Goodreads
 
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    - cron: '0 * * * *'  # Every hour on the hour
   workflow_dispatch:
 
 jobs:
@@ -29,12 +29,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-          # Ensure there are no unstaged changes before pulling
-          git add .
-          git commit -m "Auto-commit before pulling" || echo "No changes to commit"
-
-          # Pull with rebase to avoid conflicts
+          git add books.csv last_page.txt
+          git commit -m "Update book links and page number [auto]" || echo "No changes to commit"
           git pull --rebase
-          git add books.csv
-          git commit -m "Update book links [auto]" || echo "No changes to commit"
           git push
