@@ -42,7 +42,7 @@ def save_to_csv(links):
 
 if __name__ == "__main__":
     start = get_last_page()
-    end = start + 4  # 5 pages total
+    end = start + 14  # 15 pages total
     links = extract_links(start, end)
     save_to_csv(links)
     update_last_page(end + 1)
