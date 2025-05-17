@@ -15,12 +15,13 @@ HEADERS = {
 
 BATCH_SIZE = 15
 INDEX_FILE = "last_index.txt"
+CSV_FILE = "books.csv"
 
 def read_last_index():
     if not os.path.exists(INDEX_FILE):
         return 0
     with open(INDEX_FILE, "r") as f:
-        return int(f.read().strip())
+        return int(f.read().strip() or 0)
 
 def write_last_index(index):
     with open(INDEX_FILE, "w") as f:
@@ -80,17 +81,12 @@ def save_data_json(data, filename):
         logging.error(f"Save error: {e}")
 
 def main():
-    csv_file = "books.csv"
-    if not os.path.exists(csv_file):
-        logging.error(f"Missing: {csv_file}")
+    if not os.path.exists(CSV_FILE):
+        logging.error(f"Missing: {CSV_FILE}")
         return
 
-    df = pd.read_csv(csv_file)
-    if "book" not in df.columns:
-        logging.error("Missing 'book' column")
-        return
-
-    books = df["book"].dropna().tolist()
+    df = pd.read_csv(CSV_FILE, header=None)  # No column names
+    books = df[0].dropna().astype(str).tolist()
     total_books = len(books)
     last_index = read_last_index()
     next_index = min(last_index + BATCH_SIZE, total_books)
@@ -98,7 +94,7 @@ def main():
     logging.info(f"Scraping batch: {last_index} to {next_index - 1}")
 
     for i in range(last_index, next_index):
-        book_name = str(books[i]).strip()
+        book_name = books[i].strip()
         if not book_name:
             continue
 
@@ -108,14 +104,14 @@ def main():
         book_url = get_book_url(book_name)
         if book_url:
             scraped_data = scrape_data(book_url)
-            if scraped_data:
+            if scraped_data and any(scraped_data.values()):
                 save_data_json(scraped_data, filename_base)
             else:
-                logging.error(f"No data found at: {book_url}")
+                logging.warning(f"No data found for {book_name} at: {book_url}")
         else:
-            logging.error(f"No URL found for: {book_name}")
+            logging.warning(f"No URL found for: {book_name}")
 
-        time.sleep(3)  # Respectful delay
+        time.sleep(3)
 
     write_last_index(next_index)
     logging.info("Batch completed.")
