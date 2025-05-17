@@ -13,10 +13,10 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-BATCH_SIZE = 15
+BATCH_SIZE = 10
 INDEX_FILE = "last_index.txt"
 CSV_FILE = "books.csv"
-OUTPUT_DIR = "output"
+OUTPUT_FOLDER = "output"
 
 def read_last_index():
     if not os.path.exists(INDEX_FILE):
@@ -28,103 +28,70 @@ def write_last_index(index):
     with open(INDEX_FILE, "w") as f:
         f.write(str(index))
 
-def get_book_url(book_name):
-    try:
-        logging.info(f"Searching Goodreads URL for: {book_name}")
-        search_url = "https://duckduckgo.com/html/"
-        params = {"q": f"site:goodreads.com/book/show {book_name}"}
-        response = requests.get(search_url, params=params, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        results = soup.find_all('a', href=True)
-
-        for link in results:
-            href = link['href']
-            if 'goodreads.com/book/show' in href:
-                if '/l/?kh=' in href:
-                    href = requests.utils.unquote(href.split("uddg=")[-1])
-                if href.startswith("http"):
-                    logging.info(f"Found Goodreads URL: {href}")
-                    return href
-        return None
-    except Exception as e:
-        logging.error(f"Search error: {e}")
-        return None
-
 def scrape_data(book_url):
     try:
         logging.info(f"Scraping URL: {book_url}")
-        response = requests.get(book_url, headers=HEADERS, timeout=10)
+        response = requests.get(book_url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        title = soup.find("h1", {"data-testid": "bookTitle"}) or soup.find("h1")
-        author = soup.find("span", class_="ContributorLink__name") or soup.find("a", class_="authorName")
-        rating = soup.find("div", {"data-testid": "averageRating"}) or soup.find("span", itemprop="ratingValue")
-        description = soup.find("div", {"data-testid": "description"}) or soup.find("div", id="description")
+        title_tag = soup.find("h1", {"data-testid": "bookTitle"})
+        author_tag = soup.find("span", {"class": "ContributorLink__name"})
+        rating_tag = soup.find("div", {"data-testid": "averageRating"})
+        desc_tag = soup.find("div", {"data-testid": "description"})
 
         return {
-            "title": title.get_text(strip=True) if title else None,
-            "author": author.get_text(strip=True) if author else None,
-            "rating": rating.get_text(strip=True) if rating else None,
-            "description": description.get_text(strip=True) if description else None,
+            "title": title_tag.get_text(strip=True) if title_tag else None,
+            "author": author_tag.get_text(strip=True) if author_tag else None,
+            "rating": rating_tag.get_text(strip=True) if rating_tag else None,
+            "description": desc_tag.get_text(strip=True) if desc_tag else None,
             "url": book_url
         }
     except Exception as e:
-        logging.error(f"Scraping error: {e}")
+        logging.error(f"Scraping error at {book_url}: {e}")
         return None
 
 def save_data_json(data, filename):
     try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        filepath = os.path.join(OUTPUT_DIR, f"{filename}.json")
+        os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+        filepath = os.path.join(OUTPUT_FOLDER, f"{filename}.json")
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
+            json.dump(data, f, indent=4, ensure_ascii=False)
         logging.info(f"Saved: {filepath}")
     except Exception as e:
         logging.error(f"Save error: {e}")
 
 def main():
     if not os.path.exists(CSV_FILE):
-        logging.error(f"Missing file: {CSV_FILE}")
+        logging.error(f"Missing: {CSV_FILE}")
         return
 
-    df = pd.read_csv(CSV_FILE, header=None)
-    books = df[0].dropna().astype(str).tolist()
-    total_books = len(books)
-    last_index = read_last_index()
-    next_index = min(last_index + BATCH_SIZE, total_books)
+    # Load the CSV directly assuming it contains URLs without a header
+    df = pd.read_csv(CSV_FILE, header=None, names=["url"])
+    urls = df["url"].dropna().tolist()
+    total = len(urls)
 
-    logging.info(f"Scraping batch: {last_index} to {next_index - 1}")
+    last_index = read_last_index()
+    next_index = min(last_index + BATCH_SIZE, total)
+
+    logging.info(f"Scraping from index {last_index} to {next_index - 1}")
 
     for i in range(last_index, next_index):
-        book_name = books[i].strip()
-        if not book_name:
+        url = urls[i].strip()
+        if not url.startswith("http"):
             continue
 
-        filename_base = (
-            book_name.lower()
-            .replace(' ', '_')
-            .replace(':', '')
-            .replace('\'', '')
-            .replace('/', '')
-            .replace('\\', '')[:50]
-        )
-        logging.info(f"Processing: {book_name}")
-
-        book_url = get_book_url(book_name)
-        if book_url:
-            scraped_data = scrape_data(book_url)
-            if scraped_data and any(scraped_data.values()):
-                logging.info(f"Scraped data: {scraped_data}")
-                save_data_json(scraped_data, filename_base)
-            else:
-                logging.warning(f"No usable data scraped for: {book_name}")
+        filename_base = f"book_{i}"
+        data = scrape_data(url)
+        if data and data["title"]:
+            save_data_json(data, filename_base)
         else:
-            logging.warning(f"No URL found for: {book_name}")
+            logging.warning(f"No data found or skipped: {url}")
 
-        time.sleep(3)  # Respectful delay
+        time.sleep(2)  # Be polite to Goodreads
 
     write_last_index(next_index)
     logging.info("Batch completed.")
 
 if __name__ == "__main__":
     main()
+
