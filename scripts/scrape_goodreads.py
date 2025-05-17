@@ -16,12 +16,13 @@ HEADERS = {
 BATCH_SIZE = 15
 INDEX_FILE = "last_index.txt"
 CSV_FILE = "books.csv"
+OUTPUT_DIR = "output"
 
 def read_last_index():
     if not os.path.exists(INDEX_FILE):
         return 0
     with open(INDEX_FILE, "r") as f:
-        return int(f.read().strip() or 0)
+        return int(f.read().strip())
 
 def write_last_index(index):
     with open(INDEX_FILE, "w") as f:
@@ -31,7 +32,7 @@ def get_book_url(book_name):
     try:
         logging.info(f"Searching Goodreads URL for: {book_name}")
         search_url = "https://duckduckgo.com/html/"
-        params = {"q": f"site:goodreads.com {book_name}"}
+        params = {"q": f"site:goodreads.com/book/show {book_name}"}
         response = requests.get(search_url, params=params, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         results = soup.find_all('a', href=True)
@@ -39,10 +40,11 @@ def get_book_url(book_name):
         for link in results:
             href = link['href']
             if 'goodreads.com/book/show' in href:
-                if href.startswith("/l/"):
-                    href = href.split("/l/?kh=-1&uddg=")[-1]
-                    href = requests.utils.unquote(href)
-                return href
+                if '/l/?kh=' in href:
+                    href = requests.utils.unquote(href.split("uddg=")[-1])
+                if href.startswith("http"):
+                    logging.info(f"Found Goodreads URL: {href}")
+                    return href
         return None
     except Exception as e:
         logging.error(f"Search error: {e}")
@@ -54,10 +56,10 @@ def scrape_data(book_url):
         response = requests.get(book_url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        title = soup.find("h1", {"data-testid": "bookTitle"})
-        author = soup.find("span", {"class": "ContributorLink__name"})
-        rating = soup.find("div", {"data-testid": "averageRating"})
-        description = soup.find("div", {"data-testid": "description"})
+        title = soup.find("h1", {"data-testid": "bookTitle"}) or soup.find("h1")
+        author = soup.find("span", class_="ContributorLink__name") or soup.find("a", class_="authorName")
+        rating = soup.find("div", {"data-testid": "averageRating"}) or soup.find("span", itemprop="ratingValue")
+        description = soup.find("div", {"data-testid": "description"}) or soup.find("div", id="description")
 
         return {
             "title": title.get_text(strip=True) if title else None,
@@ -72,8 +74,8 @@ def scrape_data(book_url):
 
 def save_data_json(data, filename):
     try:
-        os.makedirs("output", exist_ok=True)
-        filepath = os.path.join("output", f"{filename}.json")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        filepath = os.path.join(OUTPUT_DIR, f"{filename}.json")
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
         logging.info(f"Saved: {filepath}")
@@ -82,10 +84,10 @@ def save_data_json(data, filename):
 
 def main():
     if not os.path.exists(CSV_FILE):
-        logging.error(f"Missing: {CSV_FILE}")
+        logging.error(f"Missing file: {CSV_FILE}")
         return
 
-    df = pd.read_csv(CSV_FILE, header=None)  # No column names
+    df = pd.read_csv(CSV_FILE, header=None)
     books = df[0].dropna().astype(str).tolist()
     total_books = len(books)
     last_index = read_last_index()
@@ -98,20 +100,28 @@ def main():
         if not book_name:
             continue
 
-        filename_base = book_name.lower().replace(' ', '_').replace(':', '').replace('\'', '').replace('/', '').replace('\\', '')[:50]
+        filename_base = (
+            book_name.lower()
+            .replace(' ', '_')
+            .replace(':', '')
+            .replace('\'', '')
+            .replace('/', '')
+            .replace('\\', '')[:50]
+        )
         logging.info(f"Processing: {book_name}")
 
         book_url = get_book_url(book_name)
         if book_url:
             scraped_data = scrape_data(book_url)
             if scraped_data and any(scraped_data.values()):
+                logging.info(f"Scraped data: {scraped_data}")
                 save_data_json(scraped_data, filename_base)
             else:
-                logging.warning(f"No data found for {book_name} at: {book_url}")
+                logging.warning(f"No usable data scraped for: {book_name}")
         else:
             logging.warning(f"No URL found for: {book_name}")
 
-        time.sleep(3)
+        time.sleep(3)  # Respectful delay
 
     write_last_index(next_index)
     logging.info("Batch completed.")
