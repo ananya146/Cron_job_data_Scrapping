@@ -6,17 +6,29 @@ import os
 import logging
 import pandas as pd
 
-# Set up logging
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
+BATCH_SIZE = 15
+INDEX_FILE = "last_index.txt"
+
+def read_last_index():
+    if not os.path.exists(INDEX_FILE):
+        return 0
+    with open(INDEX_FILE, "r") as f:
+        return int(f.read().strip())
+
+def write_last_index(index):
+    with open(INDEX_FILE, "w") as f:
+        f.write(str(index))
+
 def get_book_url(book_name):
-    """Searches DuckDuckGo for the Goodreads URL of a book."""
     try:
-        logging.info(f"Searching for Goodreads URL for: {book_name}")
+        logging.info(f"Searching Goodreads URL for: {book_name}")
         search_url = "https://duckduckgo.com/html/"
         params = {"q": f"site:goodreads.com {book_name}"}
         response = requests.get(search_url, params=params, headers=HEADERS, timeout=10)
@@ -30,16 +42,14 @@ def get_book_url(book_name):
                     href = href.split("/l/?kh=-1&uddg=")[-1]
                     href = requests.utils.unquote(href)
                 return href
-        logging.warning("No Goodreads URL found.")
         return None
     except Exception as e:
-        logging.error(f"Error during DuckDuckGo search: {e}")
+        logging.error(f"Search error: {e}")
         return None
 
 def scrape_data(book_url):
-    """Scrapes Goodreads book data from the provided URL."""
     try:
-        logging.info(f"Scraping data from URL: {book_url}")
+        logging.info(f"Scraping URL: {book_url}")
         response = requests.get(book_url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -48,68 +58,67 @@ def scrape_data(book_url):
         rating = soup.find("div", {"data-testid": "averageRating"})
         description = soup.find("div", {"data-testid": "description"})
 
-        data = {
+        return {
             "title": title.get_text(strip=True) if title else None,
             "author": author.get_text(strip=True) if author else None,
             "rating": rating.get_text(strip=True) if rating else None,
             "description": description.get_text(strip=True) if description else None,
             "url": book_url
         }
-
-        return data
     except Exception as e:
-        logging.error(f"Error while scraping Goodreads page: {e}")
+        logging.error(f"Scraping error: {e}")
         return None
 
 def save_data_json(data, filename):
-    """Saves scraped data to a JSON file."""
     try:
-        if not os.path.exists('output'):
-            os.makedirs('output')
-        filepath = os.path.join('output', f"{filename}.json")
-        with open(filepath, 'w', encoding='utf-8') as f:
+        os.makedirs("output", exist_ok=True)
+        filepath = os.path.join("output", f"{filename}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
-        logging.info(f"Data saved to {filepath}")
+        logging.info(f"Saved: {filepath}")
     except Exception as e:
-        logging.error(f"Failed to save JSON: {e}")
+        logging.error(f"Save error: {e}")
 
 def main():
-    csv_file = 'books.csv'
+    csv_file = "books.csv"
     if not os.path.exists(csv_file):
-        logging.error(f"CSV file '{csv_file}' not found.")
+        logging.error(f"Missing: {csv_file}")
         return
 
-    try:
-        df = pd.read_csv(csv_file)
-        if 'book' not in df.columns:
-            logging.error("CSV must contain a column named 'book'.")
-            return
+    df = pd.read_csv(csv_file)
+    if "book" not in df.columns:
+        logging.error("Missing 'book' column")
+        return
 
-        for book_name in df['book']:
-            book_name = str(book_name).strip()
-            if not book_name:
-                continue
+    books = df["book"].dropna().tolist()
+    total_books = len(books)
+    last_index = read_last_index()
+    next_index = min(last_index + BATCH_SIZE, total_books)
 
-            filename_base = book_name.lower().replace(' ', '_').replace(':', '').replace('\'', '').replace('/', '').replace('\\', '')[:50]
+    logging.info(f"Scraping batch: {last_index} to {next_index - 1}")
 
-            logging.info(f"\n\n--- Starting Goodreads Scraper for: {book_name} ---")
-            book_url = get_book_url(book_name)
+    for i in range(last_index, next_index):
+        book_name = str(books[i]).strip()
+        if not book_name:
+            continue
 
-            if book_url:
-                scraped_data = scrape_data(book_url)
-                if scraped_data:
-                    save_data_json(scraped_data, filename_base)
-                else:
-                    logging.error(f"Failed to scrape data for book URL: {book_url}")
+        filename_base = book_name.lower().replace(' ', '_').replace(':', '').replace('\'', '').replace('/', '').replace('\\', '')[:50]
+        logging.info(f"Processing: {book_name}")
+
+        book_url = get_book_url(book_name)
+        if book_url:
+            scraped_data = scrape_data(book_url)
+            if scraped_data:
+                save_data_json(scraped_data, filename_base)
             else:
-                logging.error(f"Could not find a valid Goodreads URL for: {book_name}")
+                logging.error(f"No data found at: {book_url}")
+        else:
+            logging.error(f"No URL found for: {book_name}")
 
-            time.sleep(3)  # Delay to avoid rate limiting
+        time.sleep(3)  # Respectful delay
 
-    except Exception as e:
-        logging.error(f"Critical error while reading or processing the CSV: {e}")
-    finally:
-        logging.info("\n--- All scraping finished ---")
+    write_last_index(next_index)
+    logging.info("Batch completed.")
 
 if __name__ == "__main__":
     main()
