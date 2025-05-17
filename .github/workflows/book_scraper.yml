@@ -1,25 +1,35 @@
+name: Scrape Goodreads Data
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+  workflow_dispatch:
+
 jobs:
-  scrape:
+  run-scraper:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: '3.11'
 
       - name: Install dependencies
         run: pip install requests beautifulsoup4 pandas
 
-      - name: Run scraper
-        run: python scraper.py
+      - name: Run scraper (batch of 15 from last_index.txt)
+        run: python scripts/scrape_goodreads.py
 
-      - name: Commit updated index and outputs
+      - name: Commit and push scraped data and last index
         run: |
           git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add last_index.txt output/
-          git commit -m "Update scraped batch and index [skip ci]" || echo "Nothing to commit"
+          git config --global user.email "github-actions@github.com"
+
+          git add output/ last_index.txt
+          git commit -m "Update scraped data and last index [auto]" || echo "No changes to commit"
+          git pull --rebase
           git push
